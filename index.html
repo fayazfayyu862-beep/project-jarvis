@@ -275,35 +275,161 @@
 
   </main>
 
-  <script>
-    function sendCommand() {
-      const input = document.getElementById("command");
-      const chat = document.getElementById("chat");
+  
+<script>
+  const chat = document.getElementById("chat");
+  const input = document.getElementById("command");
+  const status = document.querySelector(".status");
 
-      if (!input.value.trim()) return;
+  let recognition;
+  let listening = false;
 
-      const message = document.createElement("p");
-      message.textContent = "YOU: " + input.value;
-      chat.appendChild(message);
+  function addMessage(sender, message) {
+    const p = document.createElement("p");
+    p.textContent = sender + ": " + message;
+    chat.appendChild(p);
+    chat.scrollTop = chat.scrollHeight;
+  }
 
-      const reply = document.createElement("p");
-      reply.textContent =
-        "JARVIS: Command received. AI brain not connected yet.";
-      chat.appendChild(reply);
-
-      input.value = "";
-      chat.scrollTop = chat.scrollHeight;
+  function speak(message) {
+    if (!("speechSynthesis" in window)) {
+      addMessage("JARVIS", "Voice output is not supported.");
+      return;
     }
 
-    function startVoice() {
-      const chat = document.getElementById("chat");
-      const message = document.createElement("p");
+    window.speechSynthesis.cancel();
 
-      message.textContent =
-        "JARVIS: Voice module will be activated in the next development phase.";
+    const speech = new SpeechSynthesisUtterance(message);
+    speech.lang = "en-IN";
+    speech.rate = 0.95;
+    speech.pitch = 0.9;
+    speech.volume = 1;
 
-      chat.appendChild(message);
+    window.speechSynthesis.speak(speech);
+  }
+
+  function processCommand(command) {
+    const text = command.toLowerCase().trim();
+
+    addMessage("YOU", command);
+
+    let response;
+
+    if (
+      text.includes("hello") ||
+      text.includes("hey jarvis") ||
+      text.includes("hi jarvis")
+    ) {
+      response = "Hello, sir. JARVIS is at your service.";
     }
-  </script>
+
+    else if (
+      text.includes("who are you") ||
+      text.includes("your name")
+    ) {
+      response = "I am JARVIS, your personal assistant.";
+    }
+
+    else if (text.includes("time")) {
+      response = "The current time is " +
+        new Date().toLocaleTimeString("en-IN");
+    }
+
+    else if (text.includes("date") ||
+             text.includes("today")) {
+      response = "Today's date is " +
+        new Date().toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        });
+    }
+
+    else if (text.includes("how are you")) {
+      response = "All systems are functioning normally, sir.";
+    }
+
+    else if (text.includes("stop speaking")) {
+      window.speechSynthesis.cancel();
+      response = "Voice output stopped, sir.";
+    }
+
+    else {
+      response = "I received your command, sir. My advanced AI brain is not connected yet.";
+    }
+
+    addMessage("JARVIS", response);
+    speak(response);
+  }
+
+  function sendCommand() {
+    const command = input.value.trim();
+
+    if (!command) return;
+
+    input.value = "";
+    processCommand(command);
+  }
+
+  input.addEventListener("keydown", function(event) {
+    if (event.key === "Enter") {
+      sendCommand();
+    }
+  });
+
+  function startVoice() {
+    const SpeechRecognition =
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      addMessage(
+        "JARVIS",
+        "Voice recognition is not supported by this browser."
+      );
+      return;
+    }
+
+    if (listening && recognition) {
+      recognition.stop();
+      return;
+    }
+
+    recognition = new SpeechRecognition();
+
+    recognition.lang = "en-IN";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = function() {
+      listening = true;
+      status.textContent = "● LISTENING";
+      status.style.color = "#55ffb1";
+      addMessage("JARVIS", "I'm listening, sir.");
+    };
+
+    recognition.onresult = function(event) {
+      const command =
+        event.results[0][0].transcript;
+
+      processCommand(command);
+    };
+
+    recognition.onerror = function(event) {
+      addMessage(
+        "JARVIS",
+        "Voice recognition error: " + event.error
+      );
+    };
+
+    recognition.onend = function() {
+      listening = false;
+      status.textContent = "● INITIALIZED";
+    };
+
+    recognition.start();
+  }
+</script>
+
 </body>
 </html>
