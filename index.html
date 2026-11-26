@@ -139,6 +139,7 @@
     .system-row {
       display: flex;
       justify-content: space-between;
+      gap: 10px;
       padding: 9px 0;
       font-size: 13px;
       color: #9ebdca;
@@ -149,11 +150,16 @@
     }
 
     .chat {
-      height: 150px;
+      height: 190px;
       overflow-y: auto;
       font-size: 13px;
       line-height: 1.7;
       color: #a9d9e8;
+      overflow-wrap: anywhere;
+    }
+
+    .chat p {
+      margin-bottom: 7px;
     }
 
     .input-area {
@@ -180,6 +186,11 @@
       padding: 12px 15px;
       border-radius: 8px;
       cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     button:active {
@@ -209,7 +220,7 @@
 
     <header>
       <div class="logo">J.A.R.V.I.S.</div>
-      <div class="status">● INITIALIZED</div>
+      <div class="status" id="systemStatus">● INITIALIZED</div>
     </header>
 
     <section class="core-area">
@@ -233,12 +244,12 @@
 
       <div class="system-row">
         <span>AI Connection</span>
-        <span>NOT CONNECTED</span>
+        <span id="aiStatus">CONNECTING...</span>
       </div>
 
       <div class="system-row">
         <span>Voice Module</span>
-        <span>STANDBY</span>
+        <span id="voiceStatus">STANDBY</span>
       </div>
 
       <div class="system-row">
@@ -253,36 +264,47 @@
       <div class="chat" id="chat">
         <p>JARVIS: Good day, sir.</p>
         <p>JARVIS: All visual systems initialized.</p>
-        <p>JARVIS: Awaiting your command.</p>
+        <p>JARVIS: Connecting to my AI brain...</p>
       </div>
 
       <div class="input-area">
-        <input id="command"
+        <input
+          id="command"
           type="text"
-          placeholder="Enter your command...">
+          placeholder="Ask JARVIS anything..."
+          autocomplete="off"
+        >
 
-        <button onclick="sendCommand()">SEND</button>
+        <button id="sendBtn" onclick="sendCommand()">SEND</button>
       </div>
 
-      <button class="mic" onclick="startVoice()">
+      <button class="mic" id="micBtn" onclick="startVoice()">
         🎙 ACTIVATE VOICE
       </button>
     </section>
 
     <footer>
-      PROJECT JARVIS · VERSION 1.0
+      PROJECT JARVIS · VERSION 2.0
     </footer>
 
   </main>
 
-  
 <script>
+  // CLOUDFLARE WORKER CONNECTION
+  const AI_ENDPOINT =
+    "https://jarvis-ai.fayazfayyu862.workers.dev";
+
   const chat = document.getElementById("chat");
   const input = document.getElementById("command");
-  const status = document.querySelector(".status");
+  const systemStatus = document.getElementById("systemStatus");
+  const aiStatus = document.getElementById("aiStatus");
+  const voiceStatus = document.getElementById("voiceStatus");
+  const sendBtn = document.getElementById("sendBtn");
+  const micBtn = document.getElementById("micBtn");
 
   let recognition;
   let listening = false;
+  let aiConnected = false;
 
   function addMessage(sender, message) {
     const p = document.createElement("p");
@@ -308,36 +330,41 @@
     window.speechSynthesis.speak(speech);
   }
 
-  function processCommand(command) {
+  function stopSpeaking() {
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  // LOCAL COMMANDS
+  function processLocalCommand(command) {
     const text = command.toLowerCase().trim();
-
-    addMessage("YOU", command);
-
-    let response;
 
     if (
       text.includes("hello") ||
       text.includes("hey jarvis") ||
       text.includes("hi jarvis")
     ) {
-      response = "Hello, sir. JARVIS is at your service.";
+      return "Hello, sir. JARVIS is at your service.";
     }
 
-    else if (
+    if (
       text.includes("who are you") ||
       text.includes("your name")
     ) {
-      response = "I am JARVIS, your personal assistant.";
+      return "I am JARVIS, your personal AI assistant.";
     }
 
-    else if (text.includes("time")) {
-      response = "The current time is " +
+    if (text.includes("time")) {
+      return "The current time is " +
         new Date().toLocaleTimeString("en-IN");
     }
 
-    else if (text.includes("date") ||
-             text.includes("today")) {
-      response = "Today's date is " +
+    if (
+      text.includes("date") ||
+      text.includes("today")
+    ) {
+      return "Today's date is " +
         new Date().toLocaleDateString("en-IN", {
           day: "numeric",
           month: "long",
@@ -345,30 +372,116 @@
         });
     }
 
-    else if (text.includes("how are you")) {
-      response = "All systems are functioning normally, sir.";
+    if (text.includes("how are you")) {
+      return "All systems are functioning normally, sir.";
     }
 
-    else if (text.includes("stop speaking")) {
-      window.speechSynthesis.cancel();
-      response = "Voice output stopped, sir.";
+    if (
+      text.includes("stop speaking") ||
+      text === "be quiet"
+    ) {
+      stopSpeaking();
+      return "Voice output stopped, sir.";
     }
 
-    else {
-      response = "I received your command, sir. My advanced AI brain is not connected yet.";
-    }
-
-    addMessage("JARVIS", response);
-    speak(response);
+    return null;
   }
 
-  function sendCommand() {
+  // REAL GEMINI AI CONNECTION
+  async function askAI(command) {
+    try {
+      aiStatus.textContent = "THINKING...";
+      aiStatus.style.color = "#ffd166";
+      systemStatus.textContent = "● PROCESSING";
+
+      addMessage("JARVIS", "Processing your request, sir...");
+
+      const response = await fetch(AI_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          message:
+            "You are JARVIS, a helpful personal AI assistant. " +
+            "Address the user respectfully as sir when natural. " +
+            "Be intelligent, conversational, concise and honest. " +
+            "Never pretend you performed an action you cannot perform. " +
+            "User message: " + command
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "AI server returned an error."
+        );
+      }
+
+      if (!data.reply) {
+        throw new Error("The AI returned an empty response.");
+      }
+
+      aiConnected = true;
+      aiStatus.textContent = "ONLINE";
+      aiStatus.style.color = "#55ffb1";
+
+      systemStatus.textContent = "● AI CONNECTED";
+      systemStatus.style.color = "#55ffb1";
+
+      addMessage("JARVIS", data.reply);
+      speak(data.reply);
+
+    } catch (error) {
+      console.error("JARVIS AI Error:", error);
+
+      aiStatus.textContent = "ERROR";
+      aiStatus.style.color = "#ff7373";
+
+      systemStatus.textContent = "● CONNECTION ERROR";
+      systemStatus.style.color = "#ff7373";
+
+      addMessage(
+        "JARVIS",
+        "I'm unable to reach my AI brain right now. " +
+        error.message
+      );
+    }
+  }
+
+  // PROCESS USER COMMAND
+  async function processCommand(command) {
+    if (!command.trim()) return;
+
+    addMessage("YOU", command);
+
+    const localResponse = processLocalCommand(command);
+
+    if (localResponse !== null) {
+      addMessage("JARVIS", localResponse);
+      speak(localResponse);
+      return;
+    }
+
+    await askAI(command);
+  }
+
+  // TEXT INPUT
+  async function sendCommand() {
     const command = input.value.trim();
 
-    if (!command) return;
+    if (!command || sendBtn.disabled) return;
 
     input.value = "";
-    processCommand(command);
+    sendBtn.disabled = true;
+
+    try {
+      await processCommand(command);
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
   }
 
   input.addEventListener("keydown", function(event) {
@@ -377,6 +490,7 @@
     }
   });
 
+  // VOICE RECOGNITION
   function startVoice() {
     const SpeechRecognition =
       window.SpeechRecognition ||
@@ -403,8 +517,11 @@
 
     recognition.onstart = function() {
       listening = true;
-      status.textContent = "● LISTENING";
-      status.style.color = "#55ffb1";
+      systemStatus.textContent = "● LISTENING";
+      voiceStatus.textContent = "LISTENING";
+      voiceStatus.style.color = "#55ffb1";
+      micBtn.textContent = "🔴 STOP LISTENING";
+
       addMessage("JARVIS", "I'm listening, sir.");
     };
 
@@ -424,7 +541,15 @@
 
     recognition.onend = function() {
       listening = false;
-      status.textContent = "● INITIALIZED";
+      voiceStatus.textContent = "STANDBY";
+      voiceStatus.style.color = "";
+      micBtn.textContent = "🎙 ACTIVATE VOICE";
+
+      if (aiConnected) {
+        systemStatus.textContent = "● AI CONNECTED";
+      } else {
+        systemStatus.textContent = "● INITIALIZED";
+      }
     };
 
     recognition.start();
