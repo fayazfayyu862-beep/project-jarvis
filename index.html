@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#050b14">
+  <meta name="description" content="JARVIS - Personal AI Assistant">
   <title>J.A.R.V.I.S. | Personal AI</title>
 
   <style>
@@ -34,6 +35,7 @@
       align-items: center;
       border-bottom: 1px solid #16465b;
       padding-bottom: 18px;
+      gap: 10px;
     }
 
     .logo {
@@ -149,13 +151,23 @@
       color: #55ffb1;
     }
 
+    .warning {
+      color: #ffd166;
+    }
+
+    .error {
+      color: #ff7373;
+    }
+
     .chat {
-      height: 190px;
+      height: 240px;
       overflow-y: auto;
       font-size: 13px;
       line-height: 1.7;
       color: #a9d9e8;
       overflow-wrap: anywhere;
+      scrollbar-width: thin;
+      scrollbar-color: #22617b #091522;
     }
 
     .chat p {
@@ -179,6 +191,11 @@
       outline: none;
     }
 
+    input:focus {
+      border-color: #31cfff;
+      box-shadow: 0 0 10px #006d91;
+    }
+
     button {
       background: #06364c;
       color: #66e6ff;
@@ -186,6 +203,7 @@
       padding: 12px 15px;
       border-radius: 8px;
       cursor: pointer;
+      font-weight: bold;
     }
 
     button:disabled {
@@ -205,12 +223,40 @@
       letter-spacing: 2px;
     }
 
+    .memory-note {
+      color: #6995a8;
+      font-size: 11px;
+      line-height: 1.5;
+      margin-top: 12px;
+    }
+
     footer {
       text-align: center;
       color: #426477;
       font-size: 10px;
       letter-spacing: 3px;
       margin-top: 35px;
+      padding-bottom: 15px;
+    }
+
+    @media (max-width: 380px) {
+      .app {
+        padding: 20px 14px;
+      }
+
+      .logo {
+        font-size: 21px;
+        letter-spacing: 3px;
+      }
+
+      .status {
+        font-size: 9px;
+      }
+
+      .core {
+        width: 180px;
+        height: 180px;
+      }
     }
   </style>
 </head>
@@ -244,7 +290,7 @@
 
       <div class="system-row">
         <span>AI Connection</span>
-        <span id="aiStatus">CONNECTING...</span>
+        <span id="aiStatus">STANDBY</span>
       </div>
 
       <div class="system-row">
@@ -254,17 +300,17 @@
 
       <div class="system-row">
         <span>Memory Module</span>
-        <span>STANDBY</span>
+        <span id="memoryStatus">AWAITING CONNECTION</span>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-title">JARVIS TERMINAL</div>
 
-      <div class="chat" id="chat">
+      <div class="chat" id="chat" aria-live="polite">
         <p>JARVIS: Good day, sir.</p>
         <p>JARVIS: All visual systems initialized.</p>
-        <p>JARVIS: Connecting to my AI brain...</p>
+        <p>JARVIS: AI and memory systems standing by.</p>
       </div>
 
       <div class="input-area">
@@ -275,22 +321,29 @@
           autocomplete="off"
         >
 
-        <button id="sendBtn" onclick="sendCommand()">SEND</button>
+        <button id="sendBtn" type="button">SEND</button>
       </div>
 
-      <button class="mic" id="micBtn" onclick="startVoice()">
+      <button class="mic" id="micBtn" type="button">
         🎙 ACTIVATE VOICE
       </button>
+
+      <p class="memory-note">
+        Conversation memory is stored in your connected Cloudflare database.
+      </p>
     </section>
 
     <footer>
-      PROJECT JARVIS · VERSION 2.0
+      PROJECT JARVIS · VERSION 3.0
     </footer>
 
   </main>
 
 <script>
-  // CLOUDFLARE WORKER CONNECTION
+  // ==========================================
+  // 1. CLOUDFLARE WORKER CONNECTION
+  // ==========================================
+
   const AI_ENDPOINT =
     "https://jarvis-ai.fayazfayyu862.workers.dev";
 
@@ -299,12 +352,18 @@
   const systemStatus = document.getElementById("systemStatus");
   const aiStatus = document.getElementById("aiStatus");
   const voiceStatus = document.getElementById("voiceStatus");
+  const memoryStatus = document.getElementById("memoryStatus");
   const sendBtn = document.getElementById("sendBtn");
   const micBtn = document.getElementById("micBtn");
 
   let recognition;
   let listening = false;
   let aiConnected = false;
+  let requestInProgress = false;
+
+  // ==========================================
+  // 2. CHAT DISPLAY
+  // ==========================================
 
   function addMessage(sender, message) {
     const p = document.createElement("p");
@@ -313,9 +372,12 @@
     chat.scrollTop = chat.scrollHeight;
   }
 
+  // ==========================================
+  // 3. VOICE OUTPUT
+  // ==========================================
+
   function speak(message) {
     if (!("speechSynthesis" in window)) {
-      addMessage("JARVIS", "Voice output is not supported.");
       return;
     }
 
@@ -336,7 +398,33 @@
     }
   }
 
-  // LOCAL COMMANDS
+  // ==========================================
+  // 4. ACCESS PASSWORD
+  // ==========================================
+
+  function getAccessPassword() {
+    let password = sessionStorage.getItem("jarvis_password");
+
+    if (!password) {
+      password = prompt(
+        "JARVIS SECURITY SYSTEM\n\nEnter your private access password:"
+      );
+
+      if (password === null || !password.trim()) {
+        throw new Error("Access cancelled. Password required.");
+      }
+
+      password = password.trim();
+      sessionStorage.setItem("jarvis_password", password);
+    }
+
+    return password;
+  }
+
+  // ==========================================
+  // 5. LOCAL COMMANDS
+  // ==========================================
+
   function processLocalCommand(command) {
     const text = command.toLowerCase().trim();
 
@@ -387,31 +475,53 @@
     return null;
   }
 
-  // REAL GEMINI AI CONNECTION
+  // ==========================================
+  // 6. REAL GEMINI AI + DATABASE MEMORY
+  // ==========================================
+
   async function askAI(command) {
     try {
       aiStatus.textContent = "THINKING...";
-      aiStatus.style.color = "#ffd166";
+      aiStatus.className = "warning";
+
       systemStatus.textContent = "● PROCESSING";
+      systemStatus.className = "status warning";
 
       addMessage("JARVIS", "Processing your request, sir...");
 
-      const response = await fetch(AI_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          message:
-            "You are JARVIS, a helpful personal AI assistant. " +
-            "Address the user respectfully as sir when natural. " +
-            "Be intelligent, conversational, concise and honest. " +
-            "Never pretend you performed an action you cannot perform. " +
-            "User message: " + command
-        })
-      });
+      let response;
+      let data;
 
-      const data = await response.json();
+      // Retry once if the password is incorrect.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const password = getAccessPassword();
+
+        response = await fetch(AI_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            password: password,
+            message: command
+          })
+        });
+
+        data = await response.json();
+
+        if (response.status !== 401) {
+          break;
+        }
+
+        sessionStorage.removeItem("jarvis_password");
+
+        if (attempt === 0) {
+          addMessage(
+            "JARVIS",
+            "Access denied. Please enter your password again."
+          );
+        }
+      }
 
       if (!response.ok) {
         throw new Error(
@@ -424,11 +534,20 @@
       }
 
       aiConnected = true;
+
       aiStatus.textContent = "ONLINE";
-      aiStatus.style.color = "#55ffb1";
+      aiStatus.className = "online";
 
       systemStatus.textContent = "● AI CONNECTED";
-      systemStatus.style.color = "#55ffb1";
+      systemStatus.className = "status online";
+
+      if (data.memory === "saved") {
+        memoryStatus.textContent = "ONLINE · SAVED";
+        memoryStatus.className = "online";
+      } else {
+        memoryStatus.textContent = "CONNECTED";
+        memoryStatus.className = "warning";
+      }
 
       addMessage("JARVIS", data.reply);
       speak(data.reply);
@@ -437,20 +556,23 @@
       console.error("JARVIS AI Error:", error);
 
       aiStatus.textContent = "ERROR";
-      aiStatus.style.color = "#ff7373";
+      aiStatus.className = "error";
 
       systemStatus.textContent = "● CONNECTION ERROR";
-      systemStatus.style.color = "#ff7373";
+      systemStatus.className = "status error";
 
       addMessage(
         "JARVIS",
-        "I'm unable to reach my AI brain right now. " +
+        "I'm unable to complete that request, sir. " +
         error.message
       );
     }
   }
 
-  // PROCESS USER COMMAND
+  // ==========================================
+  // 7. PROCESS USER COMMAND
+  // ==========================================
+
   async function processCommand(command) {
     if (!command.trim()) return;
 
@@ -460,29 +582,43 @@
 
     if (localResponse !== null) {
       addMessage("JARVIS", localResponse);
-      speak(localResponse);
+
+      if (
+        !command.toLowerCase().includes("stop speaking") &&
+        command.toLowerCase().trim() !== "be quiet"
+      ) {
+        speak(localResponse);
+      }
+
       return;
     }
 
     await askAI(command);
   }
 
-  // TEXT INPUT
+  // ==========================================
+  // 8. TEXT INPUT
+  // ==========================================
+
   async function sendCommand() {
     const command = input.value.trim();
 
-    if (!command || sendBtn.disabled) return;
+    if (!command || requestInProgress) return;
 
     input.value = "";
+    requestInProgress = true;
     sendBtn.disabled = true;
 
     try {
       await processCommand(command);
     } finally {
+      requestInProgress = false;
       sendBtn.disabled = false;
       input.focus();
     }
   }
+
+  sendBtn.addEventListener("click", sendCommand);
 
   input.addEventListener("keydown", function(event) {
     if (event.key === "Enter") {
@@ -490,7 +626,10 @@
     }
   });
 
-  // VOICE RECOGNITION
+  // ==========================================
+  // 9. VOICE RECOGNITION
+  // ==========================================
+
   function startVoice() {
     const SpeechRecognition =
       window.SpeechRecognition ||
@@ -517,9 +656,13 @@
 
     recognition.onstart = function() {
       listening = true;
+
       systemStatus.textContent = "● LISTENING";
+      systemStatus.className = "status online";
+
       voiceStatus.textContent = "LISTENING";
-      voiceStatus.style.color = "#55ffb1";
+      voiceStatus.className = "online";
+
       micBtn.textContent = "🔴 STOP LISTENING";
 
       addMessage("JARVIS", "I'm listening, sir.");
@@ -529,7 +672,8 @@
       const command =
         event.results[0][0].transcript;
 
-      processCommand(command);
+      input.value = command;
+      sendCommand();
     };
 
     recognition.onerror = function(event) {
@@ -541,19 +685,48 @@
 
     recognition.onend = function() {
       listening = false;
+
       voiceStatus.textContent = "STANDBY";
-      voiceStatus.style.color = "";
+      voiceStatus.className = "";
+
       micBtn.textContent = "🎙 ACTIVATE VOICE";
 
       if (aiConnected) {
         systemStatus.textContent = "● AI CONNECTED";
+        systemStatus.className = "status online";
       } else {
         systemStatus.textContent = "● INITIALIZED";
+        systemStatus.className = "status";
       }
     };
 
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (error) {
+      addMessage(
+        "JARVIS",
+        "Unable to start voice recognition."
+      );
+    }
   }
+
+  micBtn.addEventListener("click", startVoice);
+
+  // ==========================================
+  // 10. INITIALIZATION
+  // ==========================================
+
+  window.addEventListener("load", function() {
+    addMessage(
+      "JARVIS",
+      "All local systems are operational, sir."
+    );
+
+    addMessage(
+      "JARVIS",
+      "AI connection and database memory are standing by."
+    );
+  });
 </script>
 
 </body>
